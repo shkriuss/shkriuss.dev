@@ -1,0 +1,122 @@
+name: Keygen Signing Key (Browser-Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: "Lowercase app slug (e.g. notes, budget, calendar)"
+        required: true
+        type: string
+      keystore_password:
+        description: "Strong random password protecting the PKCS#12 keystore (24+ chars)"
+        required: true
+        type: string
+      backup_passphrase:
+        description: "Separate strong passphrase encrypting the downloadable backup file (24+ chars)"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  keygen:
+    name: Generate Encrypted Per-App Signing Key
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Set up JDK 21 (for keytool)
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Generate PKCS#12 key in RAM and encrypt backup
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          KEYSTORE_PASSWORD: ${{ inputs.keystore_password }}
+          BACKUP_PASSPHRASE: ${{ inputs.backup_passphrase }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${KEYSTORE_PASSWORD}"
+          echo "::add-mask::${BACKUP_PASSPHRASE}"
+
+          if ! printf '%s' "$APP_NAME" | grep -Eq '^[a-z][a-z0-9]{1,24}$'; then
+            echo "::error::Invalid app_name. Use 2-25 lowercase letters/digits starting with a letter."
+            exit 1
+          fi
+          if [ "${#KEYSTORE_PASSWORD}" -lt 20 ] || [ "${#BACKUP_PASSPHRASE}" -lt 20 ]; then
+            echo "::error::Both passwords must be at least 20 characters long."
+            exit 1
+          fi
+
+          WORK_DIR="/dev/shm/shkriuss-keygen-${GITHUB_RUN_ID}"
+          mkdir -p "$WORK_DIR"
+          chmod 700 "$WORK_DIR"
+
+          ALIAS="shkriuss-${APP_NAME}"
+          KEYSTORE="${WORK_DIR}/${APP_NAME}-release.p12"
+          ENC_OUT="encrypted-backup"
+          mkdir -p "$ENC_OUT"
+
+          # Generate RSA-4096 PKCS#12 signing key valid for ~27 years (10,000 days).
+          keytool -genkeypair \
+            -keystore "$KEYSTORE" \
+            -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD \
+            -keypass:env KEYSTORE_PASSWORD \
+            -alias "$ALIAS" \
+            -keyalg RSA \
+            -keysize 4096 \
+            -sigalg SHA384withRSA \
+            -validity 10000 \
+            -dname "CN=shkriuss ${APP_NAME}, OU=dev.shkriuss.${APP_NAME}, O=shkriuss.dev"
+
+          # Extract public SHA-256 certificate fingerprint only.
+          FINGERPRINT="$(keytool -list -v \
+            -keystore "$KEYSTORE" \
+            -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD \
+            -alias "$ALIAS" \
+            | awk '/SHA256:/ {print $2; exit}')"
+
+          # Encrypt keystore symmetrically with AES-256-CBC + PBKDF2-HMAC-SHA256 (600,000 iterations).
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -md sha256 \
+            -in "$KEYSTORE" \
+            -out "${ENC_OUT}/${APP_NAME}-release.p12.enc" \
+            -pass env:BACKUP_PASSPHRASE
+
+          # Provide a single-line base64 of the encrypted ciphertext for Vanadium secret pasting.
+          base64 -w 0 "${ENC_OUT}/${APP_NAME}-release.p12.enc" > "${ENC_OUT}/${APP_NAME}-release.p12.enc.b64"
+          printf '%s\n' "$FINGERPRINT" > "${ENC_OUT}/${APP_NAME}-sha256-fingerprint.txt"
+
+          {
+            echo "### Signing Key Generated for \`dev.shkriuss.${APP_NAME}\`"
+            echo ""
+            echo "- **Key Alias:** \`${ALIAS}\`"
+            echo "- **Public SHA-256 Certificate Fingerprint:**"
+            echo "  \`${FINGERPRINT}\`"
+            echo ""
+            echo "#### Next Steps (Mobile Browser)"
+            echo "1. Download the encrypted artifact below and save it into your offline password manager."
+            echo "2. Publish the **public** SHA-256 fingerprint above to \`site/public/verify.html\` via PR."
+            echo "3. Delete this workflow run immediately after downloading the encrypted backup."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload encrypted backup artifact (1-day retention)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.app_name }}-signing-backup-encrypted
+          path: encrypted-backup/
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Shred RAM scratch directory
+        if: always()
+        run: |
+          WORK_DIR="/dev/shm/shkriuss-keygen-${GITHUB_RUN_ID}"
+          if [ -d "$WORK_DIR" ]; then
+            find "$WORK_DIR" -type f -exec shred -u {} \; || true
+            rm -rf "$WORK_DIR"
+          fi

@@ -1,0 +1,37 @@
+# Gradle & Build outputs
+.gradle/
+.kotlin/
+build/
+**/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing keys & secrets — NEVER commit
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.age
+*.gpg
+key.properties
+signing.properties
+.env
+.env.*
+
+# IDE / OS noise
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Cloudflare Wrangler local state
+site/.wrangler/
+.wrangler/
+
+# Temporary Roborazzi diff/comparison artifacts (only intentional golden PNGs may be committed)
+**/build/outputs/roborazzi/
+**/build/intermediates/roborazzi/

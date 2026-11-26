@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify &amp; Install — shkriuss.dev</title>
+  <meta name="description" content="APK signing certificate SHA-256 fingerprints, AppVerifier instructions, and installation guidance for GrapheneOS and stock Android.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <a class="site-brand" href="/">shkriuss.dev</a>
+      <p class="tagline">Independent APK signature verification and installation instructions.</p>
+      <nav aria-label="Main navigation">
+        <a href="/">Apps</a>
+        <a href="/verify.html">Verify &amp; Install</a>
+        <a href="/security.html">Security &amp; Privacy</a>
+        <a href="https://github.com/shkriuss/shkriuss.dev">Source Code</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1>Verify Signing Fingerprints</h1>
+      <p>
+        Each shkriuss app uses its own dedicated RSA-4096 signing key with APK Signature Scheme v3.1,
+        reproducible Gradle builds (no Google Play dependency signing block), and GitHub SLSA Build
+        Level 3 provenance attestations.
+      </p>
+
+      <h2>How to Verify on GrapheneOS</h2>
+      <ol>
+        <li>Download the release APK from <a href="https://github.com/shkriuss/shkriuss.dev/releases">GitHub Releases</a> (or track releases via <strong>Obtainium</strong>).</li>
+        <li>Open <strong>AppVerifier</strong> on GrapheneOS and select the downloaded APK or installed app.</li>
+        <li>Compare the displayed SHA-256 signing certificate fingerprint character-for-character against the table below.</li>
+      </ol>
+
+      <h2>Published SHA-256 Certificate Fingerprints</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>App</th>
+            <th>Package ID</th>
+            <th>Signing Certificate SHA-256</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>All Phase 1+ Apps</td>
+            <td><code>dev.shkriuss.&lt;app&gt;</code></td>
+            <td class="muted">Pending first app release (populated via audited PR upon key generation).</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Installing on GrapheneOS vs. Stock Android (2026–2027 Verification Rules)</h2>
+      <p>
+        <strong>GrapheneOS:</strong> Installs signed open-source APKs normally with zero Google account
+        or Play Protect involvement.
+      </p>
+      <p>
+        <strong>Stock / Certified Android:</strong> shkriuss intentionally remains unregistered with
+        Google's Android Developer Verification program to maintain zero runtime or identity dependency
+        on Google. On certified Android devices in regions enforcing Developer Verification, users can
+        still install unregistered FOSS APKs via Android's official <strong>Advanced Flow</strong>
+        (explicit user confirmation / waiting period) or compile from source and sign with their own key.
+      </p>
+    </main>
+
+    <footer>
+      <p>
+        Plain static HTML &amp; CSS. Zero JavaScript, zero cookies, zero trackers.
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

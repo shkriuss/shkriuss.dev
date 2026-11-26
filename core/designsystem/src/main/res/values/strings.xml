@@ -1,0 +1,17 @@
+<resources>
+    <string name="shkriuss_showcase_suite_title">shkriuss</string>
+    <string name="shkriuss_showcase_subtitle">Calm, local-first native Android tools</string>
+    <string name="shkriuss_showcase_badge_offline">Offline only</string>
+    <string name="shkriuss_showcase_badge_encrypted">StrongBox AES-256</string>
+    <string name="shkriuss_showcase_section_overview">Workspace Overview</string>
+    <string name="shkriuss_showcase_section_actions">Quick Actions</string>
+    <string name="shkriuss_showcase_card_notes_title">Personal Notes</string>
+    <string name="shkriuss_showcase_card_notes_body">Encrypted at rest with per-record authenticated data and zero network permissions.</string>
+    <string name="shkriuss_showcase_card_backup_title">Encrypted Backup</string>
+    <string name="shkriuss_showcase_card_backup_body">Stream an Argon2id + AES-256-GCM archive directly to storage via Storage Access Framework.</string>
+    <string name="shkriuss_showcase_action_primary">Create Entry</string>
+    <string name="shkriuss_showcase_action_secondary">Export Backup</string>
+    <string name="shkriuss_showcase_empty_title">Nothing stored yet</string>
+    <string name="shkriuss_showcase_empty_body">Entries stay encrypted on your device and never leave unless you export or enable self-hosted sync.</string>
+    <string name="shkriuss_showcase_empty_action">Get Started</string>
+</resources>

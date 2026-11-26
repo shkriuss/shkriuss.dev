@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|Bash|Shell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".agents/scripts/pre-tool-guard.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
