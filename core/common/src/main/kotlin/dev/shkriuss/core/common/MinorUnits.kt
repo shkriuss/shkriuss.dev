@@ -30,8 +30,8 @@ value class MinorUnits(val amount: Long) : Comparable<MinorUnits> {
             val trimmed = input.trim()
             if (trimmed.isEmpty()) return null
             val decimal = trimmed.toBigDecimalOrNull() ?: return null
-            val scaled = decimal.setScale(scale, RoundingMode.UNNECESSARY)
             return runCatching {
+                val scaled = decimal.setScale(scale, RoundingMode.UNNECESSARY)
                 MinorUnits(scaled.movePointRight(scale).longValueExact())
             }.getOrNull()
         }
