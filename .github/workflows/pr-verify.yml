@@ -159,13 +159,18 @@ jobs:
             }
             if (!passed && fs.existsSync('ci-logs/last-step.log')) {
               const raw = fs.readFileSync('ci-logs/last-step.log', 'utf8');
-              const tail = raw.split('\n').slice(-100).join('\n').slice(-10000);
+              const allLines = raw.split('\n');
+              const highlights = allLines.filter(l =>
+                /^e: |FAILED|FAILURE:|What went wrong:|Caused by:|Exception|AssertionError|Error:/.test(l)
+              ).slice(-40);
+              const tail = allLines.slice(-60);
+              const excerpt = [...new Set([...highlights, '--- tail ---', ...tail])].join('\n').slice(-10000);
               lines.push(
                 '',
-                '<details><summary>Failure log tail (mobile-friendly)</summary>',
+                '<details><summary>Failure log summary (mobile-friendly)</summary>',
                 '',
                 '```text',
-                tail,
+                excerpt,
                 '```',
                 '</details>',
               );
