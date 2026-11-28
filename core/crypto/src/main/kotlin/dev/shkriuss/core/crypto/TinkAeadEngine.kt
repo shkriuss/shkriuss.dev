@@ -66,7 +66,8 @@ class TinkAeadEngine private constructor(
 
         /**
          * Creates an Android Keystore-wrapped Tink AES-256-GCM AEAD instance.
-         * Never stores unencrypted key material on disk.
+         * Synchronized across `KeystoreLock` so concurrent first-launch callers cannot race
+         * inside `AndroidKeysetManager` when generating and persisting the wrapped keyset.
          */
         fun forAndroidKeystore(
             context: Context,
@@ -74,22 +75,27 @@ class TinkAeadEngine private constructor(
             prefFileName: String,
             masterKeyAlias: String,
         ): AppResult<TinkAeadEngine> {
-            return try {
-                TinkRegistry.ensureInitialized()
-                val masterKey = when (val keyResult = KeystoreMasterKeyProvider.getOrCreateMasterKey(masterKeyAlias)) {
-                    is AppResult.Success -> keyResult.value
-                    is AppResult.Failure -> return keyResult
+            if (keysetName.isBlank() || prefFileName.isBlank()) {
+                return AppResult.Failure(AppError.Validation("keysetName and prefFileName must not be blank"))
+            }
+            synchronized(KeystoreLock) {
+                return try {
+                    TinkRegistry.ensureInitialized()
+                    val masterKey = when (val keyResult = KeystoreMasterKeyProvider.getOrCreateMasterKey(masterKeyAlias)) {
+                        is AppResult.Success -> keyResult.value
+                        is AppResult.Failure -> return keyResult
+                    }
+                    val keysetHandle = AndroidKeysetManager.Builder()
+                        .withSharedPref(context.applicationContext, keysetName, prefFileName)
+                        .withKeyTemplate(KeyTemplates.get(KEY_TEMPLATE_AES256_GCM))
+                        .withMasterKeyUri(masterKey.keystoreUri)
+                        .build()
+                        .keysetHandle
+                    val primitive = keysetHandle.getPrimitive(RegistryConfiguration.get(), Aead::class.java)
+                    AppResult.Success(TinkAeadEngine(primitive))
+                } catch (_: Exception) {
+                    AppResult.Failure(AppError.Crypto("Failed to create Android Keystore AEAD engine"))
                 }
-                val keysetHandle = AndroidKeysetManager.Builder()
-                    .withSharedPref(context.applicationContext, keysetName, prefFileName)
-                    .withKeyTemplate(KeyTemplates.get(KEY_TEMPLATE_AES256_GCM))
-                    .withMasterKeyUri(masterKey.keystoreUri)
-                    .build()
-                    .keysetHandle
-                val primitive = keysetHandle.getPrimitive(RegistryConfiguration.get(), Aead::class.java)
-                AppResult.Success(TinkAeadEngine(primitive))
-            } catch (_: Exception) {
-                AppResult.Failure(AppError.Crypto("Failed to create Android Keystore AEAD engine"))
             }
         }
 

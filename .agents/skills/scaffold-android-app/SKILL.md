@@ -17,8 +17,8 @@ Use this skill whenever adding a new app `dev.shkriuss.<appname>` to the monorep
    - NEVER apply `org.jetbrains.kotlin.android` (AGP 9.5+ built-in Kotlin is enabled).
 3. **Manifest Hardening (`src/main/AndroidManifest.xml`):**
    - `android:allowBackup="false"`
-   - `android:dataExtractionRules="@xml/data_extraction_rules"` (excluding all Room databases and DataStore files)
-   - `android:fullBackupContent="@xml/backup_rules"` (empty/exclude-all)
+   - `android:dataExtractionRules="@xml/data_extraction_rules"` (excluding `sharedpref`, `database`, `file`, and `external` in both `<cloud-backup>` and `<device-transfer>` so Keystore-wrapped Tink keysets and encrypted databases never copy without their hardware KEK)
+   - `android:fullBackupContent="@xml/backup_rules"` (excluding `sharedpref`, `database`, `file`, and `external`)
    - `android:usesCleartextTraffic="false"`
    - `android:enableOnBackInvokedCallback="true"`
    - Declare ZERO broad storage permissions and ZERO `INTERNET` permission unless optional self-hosted sync is implemented in the app.

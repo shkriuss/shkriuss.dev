@@ -32,18 +32,28 @@ if grep -rnE 'org\.jetbrains\.kotlin\.android|kotlin\("android"\)' "${PLUGIN_CHE
   fail "Forbidden kotlin-android plugin detected; AGP 9.5+ built-in Kotlin must be used."
 fi
 
-echo "Checking Android source code for WebView, dynamic code loading, or deprecated EncryptedSharedPreferences..."
-FORBIDDEN_CODE='android\.webkit\.WebView|DexClassLoader|InMemoryDexClassLoader|PathClassLoader|EncryptedSharedPreferences|EncryptedFile|Runtime\.getRuntime\(\)\.exec'
-if [ "${#ANDROID_SRC_DIRS[@]}" -gt 0 ] && grep -rnE "$FORBIDDEN_CODE" "${ANDROID_SRC_DIRS[@]}"; then
-  fail "Forbidden API usage detected in Android source (WebView, DCL, Runtime.exec, or deprecated security-crypto)."
+echo "Checking for unapproved native C/C++ (.so / NDK) artifacts..."
+if [ "${#ANDROID_SRC_DIRS[@]}" -gt 0 ]; then
+  if find "${ANDROID_SRC_DIRS[@]}" -type f \( -name '*.so' -o -name 'CMakeLists.txt' -o -name 'Android.mk' \) | grep -q .; then
+    fail "Unapproved native binary (.so) or C/C++ build file detected. Native code requires an accepted ADR."
+  fi
+fi
+if [ "${#ANDROID_BUILD_DIRS[@]}" -gt 0 ] && grep -rnE 'useLegacyPackaging[[:space:]]*=[[:space:]]*true' "${ANDROID_BUILD_DIRS[@]}"; then
+  fail "useLegacyPackaging = true is forbidden; keep extractNativeLibs = false."
 fi
 
-echo "Checking AndroidManifest files for broad storage permissions..."
-FORBIDDEN_PERMS='READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|READ_MEDIA_IMAGES|READ_MEDIA_VIDEO|READ_MEDIA_AUDIO'
+echo "Checking Android source code for WebView, dynamic code loading, subprocess execution, or deprecated crypto..."
+FORBIDDEN_CODE='android\.webkit\.WebView|DexClassLoader|BaseDexClassLoader|DelegateLastClassLoader|InMemoryDexClassLoader|PathClassLoader|System\.load\(|System\.loadLibrary\(|ProcessBuilder|Runtime\.getRuntime\(\)\.exec|EncryptedSharedPreferences|EncryptedFile|androidx\.security\.crypto\.MasterKey'
+if [ "${#ANDROID_SRC_DIRS[@]}" -gt 0 ] && grep -rnE "$FORBIDDEN_CODE" "${ANDROID_SRC_DIRS[@]}"; then
+  fail "Forbidden API usage detected in Android source (WebView, DCL, native load, ProcessBuilder/exec, or deprecated security-crypto)."
+fi
+
+echo "Checking AndroidManifest files for broad storage permissions and insecure flags..."
+FORBIDDEN_MANIFEST='READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|READ_MEDIA_IMAGES|READ_MEDIA_VIDEO|READ_MEDIA_AUDIO|allowBackup="true"|usesCleartextTraffic="true"|debuggable="true"|extractNativeLibs="true"'
 if [ "${#ANDROID_SRC_DIRS[@]}" -gt 0 ]; then
   while IFS= read -r manifest; do
-    if grep -nE "$FORBIDDEN_PERMS" "$manifest"; then
-      fail "Forbidden broad storage permission detected in $manifest. Use SAF or system Photo Picker."
+    if grep -nE "$FORBIDDEN_MANIFEST" "$manifest"; then
+      fail "Forbidden permission or insecure manifest flag detected in $manifest."
     fi
   done < <(find "${ANDROID_SRC_DIRS[@]}" -name 'AndroidManifest.xml' -type f)
 fi
@@ -58,7 +68,6 @@ fi
 
 echo "Checking GitHub Actions workflows for full 40-char SHA pinning..."
 while IFS= read -r line; do
-  # Skip local workflow/action references (./...)
   if printf '%s' "$line" | grep -Eq 'uses:[[:space:]]*\./'; then
     continue
   fi

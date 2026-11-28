@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       version_tag:
-        description: "Release tag to create (e.g. notes-v0.1.0)"
+        description: "Release tag (e.g. notes-v0.1.0)"
         required: true
         type: string
 
@@ -50,25 +50,75 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      - name: Build unsigned release APK & sign in RAM with APK Signature Scheme v3.1
+      - name: Build unsigned release APK & sign in RAM with per-app key (APK Signature Scheme v3.1)
         env:
           APP_NAME: ${{ inputs.app_name }}
           VERSION_TAG: ${{ inputs.version_tag }}
-          KEYSTORE_ENC_B64: ${{ secrets.SIGNING_KEYSTORE_ENC_B64 }}
-          KEYSTORE_ENC_PASSPHRASE: ${{ secrets.SIGNING_KEYSTORE_ENC_PASSPHRASE }}
-          KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+          SIGNING_BUDGET_GPG_B64: ${{ secrets.SIGNING_BUDGET_GPG_B64 }}
+          SIGNING_BUDGET_GPG_PASSPHRASE: ${{ secrets.SIGNING_BUDGET_GPG_PASSPHRASE }}
+          SIGNING_BUDGET_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_BUDGET_KEYSTORE_PASSWORD }}
+          SIGNING_CALENDAR_GPG_B64: ${{ secrets.SIGNING_CALENDAR_GPG_B64 }}
+          SIGNING_CALENDAR_GPG_PASSPHRASE: ${{ secrets.SIGNING_CALENDAR_GPG_PASSPHRASE }}
+          SIGNING_CALENDAR_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_CALENDAR_KEYSTORE_PASSWORD }}
+          SIGNING_DRIVE_GPG_B64: ${{ secrets.SIGNING_DRIVE_GPG_B64 }}
+          SIGNING_DRIVE_GPG_PASSPHRASE: ${{ secrets.SIGNING_DRIVE_GPG_PASSPHRASE }}
+          SIGNING_DRIVE_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_DRIVE_KEYSTORE_PASSWORD }}
+          SIGNING_GRAMMAR_GPG_B64: ${{ secrets.SIGNING_GRAMMAR_GPG_B64 }}
+          SIGNING_GRAMMAR_GPG_PASSPHRASE: ${{ secrets.SIGNING_GRAMMAR_GPG_PASSPHRASE }}
+          SIGNING_GRAMMAR_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_GRAMMAR_KEYSTORE_PASSWORD }}
+          SIGNING_MEALS_GPG_B64: ${{ secrets.SIGNING_MEALS_GPG_B64 }}
+          SIGNING_MEALS_GPG_PASSPHRASE: ${{ secrets.SIGNING_MEALS_GPG_PASSPHRASE }}
+          SIGNING_MEALS_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_MEALS_KEYSTORE_PASSWORD }}
+          SIGNING_NOTES_GPG_B64: ${{ secrets.SIGNING_NOTES_GPG_B64 }}
+          SIGNING_NOTES_GPG_PASSPHRASE: ${{ secrets.SIGNING_NOTES_GPG_PASSPHRASE }}
+          SIGNING_NOTES_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_NOTES_KEYSTORE_PASSWORD }}
+          SIGNING_PHOTOS_GPG_B64: ${{ secrets.SIGNING_PHOTOS_GPG_B64 }}
+          SIGNING_PHOTOS_GPG_PASSPHRASE: ${{ secrets.SIGNING_PHOTOS_GPG_PASSPHRASE }}
+          SIGNING_PHOTOS_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_PHOTOS_KEYSTORE_PASSWORD }}
+          SIGNING_REMINDERS_GPG_B64: ${{ secrets.SIGNING_REMINDERS_GPG_B64 }}
+          SIGNING_REMINDERS_GPG_PASSPHRASE: ${{ secrets.SIGNING_REMINDERS_GPG_PASSPHRASE }}
+          SIGNING_REMINDERS_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_REMINDERS_KEYSTORE_PASSWORD }}
+          SIGNING_REPAIRS_GPG_B64: ${{ secrets.SIGNING_REPAIRS_GPG_B64 }}
+          SIGNING_REPAIRS_GPG_PASSPHRASE: ${{ secrets.SIGNING_REPAIRS_GPG_PASSPHRASE }}
+          SIGNING_REPAIRS_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_REPAIRS_KEYSTORE_PASSWORD }}
+          SIGNING_SHELF_GPG_B64: ${{ secrets.SIGNING_SHELF_GPG_B64 }}
+          SIGNING_SHELF_GPG_PASSPHRASE: ${{ secrets.SIGNING_SHELF_GPG_PASSPHRASE }}
+          SIGNING_SHELF_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_SHELF_KEYSTORE_PASSWORD }}
+          SIGNING_TASKS_GPG_B64: ${{ secrets.SIGNING_TASKS_GPG_B64 }}
+          SIGNING_TASKS_GPG_PASSPHRASE: ${{ secrets.SIGNING_TASKS_GPG_PASSPHRASE }}
+          SIGNING_TASKS_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_TASKS_KEYSTORE_PASSWORD }}
+          SIGNING_TRADES_GPG_B64: ${{ secrets.SIGNING_TRADES_GPG_B64 }}
+          SIGNING_TRADES_GPG_PASSPHRASE: ${{ secrets.SIGNING_TRADES_GPG_PASSPHRASE }}
+          SIGNING_TRADES_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_TRADES_KEYSTORE_PASSWORD }}
+          SIGNING_WATER_GPG_B64: ${{ secrets.SIGNING_WATER_GPG_B64 }}
+          SIGNING_WATER_GPG_PASSPHRASE: ${{ secrets.SIGNING_WATER_GPG_PASSPHRASE }}
+          SIGNING_WATER_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_WATER_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
           if ! printf '%s' "$APP_NAME" | grep -Eq '^[a-z][a-z0-9]{1,24}$'; then
             echo "::error::Invalid app_name."
             exit 1
           fi
+          if ! printf '%s' "$VERSION_TAG" | grep -Eq "^${APP_NAME}-v[0-9]+\.[0-9]+\.[0-9]+$"; then
+            echo "::error::version_tag must match '${APP_NAME}-vMAJOR.MINOR.PATCH'."
+            exit 1
+          fi
           if [ ! -f "apps/${APP_NAME}/build.gradle.kts" ]; then
             echo "::error::App module apps/${APP_NAME} does not exist yet."
             exit 1
           fi
-          if [ -z "$KEYSTORE_ENC_B64" ] || [ -z "$KEYSTORE_ENC_PASSPHRASE" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error::Missing signing secrets in protected 'release' GitHub Environment."
+
+          APP_UPPER="$(printf '%s' "$APP_NAME" | tr '[:lower:]' '[:upper:]')"
+          B64_VAR="SIGNING_${APP_UPPER}_GPG_B64"
+          PASS_VAR="SIGNING_${APP_UPPER}_GPG_PASSPHRASE"
+          KS_VAR="SIGNING_${APP_UPPER}_KEYSTORE_PASSWORD"
+
+          KEYSTORE_GPG_B64="${!B64_VAR:-}"
+          KEYSTORE_GPG_PASSPHRASE="${!PASS_VAR:-}"
+          export KEYSTORE_PASSWORD="${!KS_VAR:-}"
+
+          if [ -z "$KEYSTORE_GPG_B64" ] || [ -z "$KEYSTORE_GPG_PASSPHRASE" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Missing ${B64_VAR}, ${PASS_VAR}, or ${KS_VAR} in protected 'release' GitHub Environment."
             exit 1
           fi
 
@@ -81,17 +131,17 @@ jobs:
           fi
 
           WORK_DIR="/dev/shm/shkriuss-release-${GITHUB_RUN_ID}"
-          mkdir -p "$WORK_DIR" release-out
-          chmod 700 "$WORK_DIR"
+          export GNUPGHOME="${WORK_DIR}/gnupg"
+          mkdir -p "$WORK_DIR" "$GNUPGHOME" release-out
+          chmod 700 "$WORK_DIR" "$GNUPGHOME"
 
-          printf '%s' "$KEYSTORE_ENC_B64" | base64 -d > "${WORK_DIR}/keystore.p12.enc"
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 \
-            -in "${WORK_DIR}/keystore.p12.enc" \
-            -out "${WORK_DIR}/keystore.p12" \
-            -pass env:KEYSTORE_ENC_PASSPHRASE
+          printf '%s' "$KEYSTORE_GPG_B64" | base64 -d > "${WORK_DIR}/keystore.p12.gpg"
+          printf '%s' "$KEYSTORE_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --decrypt --output "${WORK_DIR}/keystore.p12" \
+            "${WORK_DIR}/keystore.p12.gpg"
 
           BUILD_TOOLS_DIR="$(ls -d "${ANDROID_HOME}"/build-tools/37.* "${ANDROID_HOME}"/build-tools/36.* 2>/dev/null | sort -V | tail -n 1)"
-          OUT_APK="release-out/shkriuss-${APP_NAME}-${VERSION_TAG}.apk"
+          OUT_APK="release-out/shkriuss-${VERSION_TAG}.apk"
 
           "${BUILD_TOOLS_DIR}/zipalign" -f -p 4 "$UNSIGNED_APK" "${WORK_DIR}/aligned.apk"
           "${BUILD_TOOLS_DIR}/apksigner" sign \
@@ -117,7 +167,7 @@ jobs:
       - name: Upload signed release artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-${{ inputs.app_name }}-${{ inputs.version_tag }}
+          name: release-${{ inputs.version_tag }}
           path: release-out/
           retention-days: 30
 

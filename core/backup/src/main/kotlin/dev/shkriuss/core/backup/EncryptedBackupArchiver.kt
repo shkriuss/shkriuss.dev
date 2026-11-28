@@ -13,10 +13,14 @@ import kotlinx.serialization.json.Json
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.util.Base64
 
 /**
@@ -41,6 +45,16 @@ data class BackupHeader(
         const val KDF_ARGON2ID: String = "argon2id"
     }
 }
+
+/**
+ * Result of [EncryptedBackupArchiver.restoreToVerifiedFile].
+ * [verifiedPlaintextFile] is guaranteed to have passed full end-of-stream AEAD verification
+ * across all segments. Callers should delete [verifiedPlaintextFile] once imported.
+ */
+data class VerifiedBackupRestore(
+    val header: BackupHeader,
+    val verifiedPlaintextFile: File,
+)
 
 /**
  * Streaming end-to-end encrypted `.shkriuss` backup archiver designed for direct use
@@ -71,6 +85,14 @@ class EncryptedBackupArchiver(
         }
         if (appSchemaVersion < 1) {
             return AppResult.Failure(AppError.Validation("appSchemaVersion must be >= 1"))
+        }
+        if (segmentSizeBytes !in StreamingAeadEngine.MIN_SEGMENT_SIZE_BYTES..StreamingAeadEngine.MAX_SEGMENT_SIZE_BYTES) {
+            return AppResult.Failure(
+                AppError.Validation(
+                    "segmentSizeBytes must be between ${StreamingAeadEngine.MIN_SEGMENT_SIZE_BYTES} " +
+                        "and ${StreamingAeadEngine.MAX_SEGMENT_SIZE_BYTES}",
+                ),
+            )
         }
 
         val salt = keyDeriver.generateSalt()
@@ -118,6 +140,56 @@ class EncryptedBackupArchiver(
         }
     }
 
+    /**
+     * Recommended restore entry point: streams decrypted backup content into an isolated
+     * temporary file inside [stagingDirectory] and verifies every segment + final EOF tag
+     * BEFORE returning. If any segment or final tag fails verification, the staging file is
+     * overwritten with zeros and deleted so callers never ingest partial unverified state.
+     */
+    fun restoreToVerifiedFile(
+        expectedAppId: String,
+        passphrase: CharArray,
+        archiveSource: InputStream,
+        stagingDirectory: File,
+    ): AppResult<VerifiedBackupRestore> {
+        if (!stagingDirectory.exists() && !stagingDirectory.mkdirs()) {
+            return AppResult.Failure(AppError.Storage("Unable to create backup staging directory"))
+        }
+        val tempFile = try {
+            Files.createTempFile(stagingDirectory.toPath(), "restore-", ".verified.tmp").toFile()
+        } catch (_: IOException) {
+            return AppResult.Failure(AppError.Storage("Unable to allocate staging file for restore"))
+        }
+
+        val result = try {
+            FileOutputStream(tempFile).use { out ->
+                readEncryptedBackup(
+                    expectedAppId = expectedAppId,
+                    passphrase = passphrase,
+                    archiveSource = archiveSource,
+                    plaintextDestination = out,
+                )
+            }
+        } catch (t: Throwable) {
+            wipeAndDelete(tempFile)
+            return AppResult.Failure(AppError.Storage("Unexpected error while staging backup restore"))
+        }
+
+        return when (result) {
+            is AppResult.Success -> AppResult.Success(
+                VerifiedBackupRestore(header = result.value, verifiedPlaintextFile = tempFile),
+            )
+            is AppResult.Failure -> {
+                wipeAndDelete(tempFile)
+                result
+            }
+        }
+    }
+
+    /**
+     * Low-level streaming decryptor. Prefer [restoreToVerifiedFile] when importing into live app
+     * databases because Streaming AEAD emits verified earlier segments before checking trailing EOF tags.
+     */
     fun readEncryptedBackup(
         expectedAppId: String,
         passphrase: CharArray,
@@ -176,6 +248,13 @@ class EncryptedBackupArchiver(
         if (header.kdf != BackupHeader.KDF_ARGON2ID) {
             return AppResult.Failure(AppError.Validation("Unsupported backup KDF: ${header.kdf}"))
         }
+        if (header.segmentSizeBytes !in StreamingAeadEngine.MIN_SEGMENT_SIZE_BYTES..StreamingAeadEngine.MAX_SEGMENT_SIZE_BYTES) {
+            return AppResult.Failure(
+                AppError.Validation(
+                    "Invalid backup segment size: ${header.segmentSizeBytes} bytes",
+                ),
+            )
+        }
 
         val salt = try {
             Base64.getDecoder().decode(header.saltBase64)
@@ -215,6 +294,26 @@ class EncryptedBackupArchiver(
                 )
             } catch (_: Exception) {
                 AppResult.Failure(AppError.Crypto("Backup decryption failed"))
+            }
+        }
+    }
+
+    private fun wipeAndDelete(file: File) {
+        runCatching {
+            if (file.exists()) {
+                val len = file.length()
+                if (len > 0L) {
+                    RandomAccessFile(file, "rws").use { raf ->
+                        val zeros = ByteArray(8_192)
+                        var remaining = len
+                        while (remaining > 0L) {
+                            val toWrite = minOf(remaining, zeros.size.toLong()).toInt()
+                            raf.write(zeros, 0, toWrite)
+                            remaining -= toWrite
+                        }
+                    }
+                }
+                file.delete()
             }
         }
     }

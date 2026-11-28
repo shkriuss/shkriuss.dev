@@ -27,12 +27,15 @@ class StreamingAeadEngine private constructor(
 
     companion object {
         const val KEY_SIZE_BYTES: Int = 32
+        const val MIN_SEGMENT_SIZE_BYTES: Int = 4_096
         const val DEFAULT_SEGMENT_SIZE_BYTES: Int = 65_536
+        const val MAX_SEGMENT_SIZE_BYTES: Int = 1_048_576
         private const val HKDF_ALG = "HmacSha256"
 
         /**
          * Builds a Streaming AEAD engine from a 256-bit key derived via Argon2id or HKDF.
-         * Makes an internal defensive copy and clears the temporary buffer cleanly.
+         * Enforces strict lower and upper segment bounds (4 KiB..1 MiB) to prevent OOM DoS
+         * when parsing untrusted backup or sync headers, and clears its temporary key copy.
          */
         fun fromRawKey(
             keyMaterial: SecureByteArray,
@@ -41,8 +44,12 @@ class StreamingAeadEngine private constructor(
             if (keyMaterial.size != KEY_SIZE_BYTES) {
                 return AppResult.Failure(AppError.Validation("Streaming key must be exactly 32 bytes"))
             }
-            if (ciphertextSegmentSizeBytes < 4_096) {
-                return AppResult.Failure(AppError.Validation("Segment size must be at least 4096 bytes"))
+            if (ciphertextSegmentSizeBytes !in MIN_SEGMENT_SIZE_BYTES..MAX_SEGMENT_SIZE_BYTES) {
+                return AppResult.Failure(
+                    AppError.Validation(
+                        "Segment size must be between $MIN_SEGMENT_SIZE_BYTES and $MAX_SEGMENT_SIZE_BYTES bytes",
+                    ),
+                )
             }
             val keyCopy = keyMaterial.copyBytes()
             return try {

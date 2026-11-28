@@ -21,10 +21,14 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     targetSdk = 37
                 }
 
-                // Disable Google Play encrypted dependency metadata block for reproducible FOSS APKs.
+                // Disable Google Play encrypted dependency metadata block and embedded VCS textproto
+                // so unsigned release APKs remain byte-for-byte reproducible across environments.
                 dependenciesInfo {
                     includeInApk = false
                     includeInBundle = false
+                }
+                vcsInfo {
+                    include = false
                 }
 
                 buildTypes {

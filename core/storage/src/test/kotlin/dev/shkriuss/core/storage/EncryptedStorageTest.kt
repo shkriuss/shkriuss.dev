@@ -71,5 +71,21 @@ class EncryptedStorageTest {
             threwCorruption = true
         }
         assertTrue(threwCorruption)
+
+        // Oversized input must raise CorruptionException before allocating unbounded memory.
+        val cappedSerializer = EncryptedDataStoreSerializer(
+            defaultValue = SampleVaultPrefs(),
+            serializer = SampleVaultPrefs.serializer(),
+            cipher = TinkAeadEngine.inMemoryForTesting(),
+            aad = RecordAad("dev.shkriuss.budget", "prefs", "main", schemaVersion = 1),
+            maxCiphertextBytes = 2_048,
+        )
+        var threwOversize = false
+        try {
+            cappedSerializer.readFrom(ByteArrayInputStream(ByteArray(4_096)))
+        } catch (_: CorruptionException) {
+            threwOversize = true
+        }
+        assertTrue(threwOversize)
     }
 }

@@ -102,4 +102,23 @@ class CryptoCoreTest {
             assertTrue(failed)
         }
     }
+
+    @Test
+    fun `streamingAead rejects out-of-bounds segment sizes`() {
+        SecureByteArray(ByteArray(32) { 1 }).use { key ->
+            assertTrue(StreamingAeadEngine.fromRawKey(key, ciphertextSegmentSizeBytes = 2_048) is AppResult.Failure)
+            assertTrue(
+                StreamingAeadEngine.fromRawKey(
+                    key,
+                    ciphertextSegmentSizeBytes = StreamingAeadEngine.MAX_SEGMENT_SIZE_BYTES + 1,
+                ) is AppResult.Failure,
+            )
+            assertTrue(
+                StreamingAeadEngine.fromRawKey(
+                    key,
+                    ciphertextSegmentSizeBytes = Int.MAX_VALUE,
+                ) is AppResult.Failure,
+            )
+        }
+    }
 }
