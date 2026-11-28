@@ -39,9 +39,9 @@ class FakeClock(private var currentEpochMillis: Long = 1_764_000_000_000L) : Clo
 object ShkriussDeviceSpecs {
     const val ROBOLECTRIC_SDK: Int = 36
 
-    const val PHONE_LIGHT: String = "w411dp-h915dp-normal-long-notround-any-420dpi-keyshidden-nonav-notnight"
-    const val PHONE_DARK: String = "w411dp-h915dp-normal-long-notround-any-420dpi-keyshidden-nonav-night"
-    const val TABLET_LIGHT: String = "w1280dp-h800dp-xlarge-notlong-notround-any-320dpi-keyshidden-nonav-notnight"
-    const val TABLET_DARK: String = "w1280dp-h800dp-xlarge-notlong-notround-any-320dpi-keyshidden-nonav-night"
+    const val PHONE_LIGHT: String = "w411dp-h915dp-port-notnight-420dpi"
+    const val PHONE_DARK: String = "w411dp-h915dp-port-night-420dpi"
+    const val TABLET_LIGHT: String = "w1280dp-h800dp-land-notnight-320dpi"
+    const val TABLET_DARK: String = "w1280dp-h800dp-land-night-320dpi"
     const val FONT_SCALE_ACCESSIBILITY: Float = 2.0f
 }
