@@ -1,0 +1,200 @@
+name: PR Verify
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pr-verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  guardrails:
+    name: Guardrails & Wrapper Validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate Gradle Wrapper integrity
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Run shkriuss platform & hardening guardrails
+        run: bash scripts/ci/check-guardrails.sh
+
+  android-verify:
+    name: Build, Test, Lint & Screenshots
+    needs: guardrails
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Android 17 QPR1 SDK (37.1) & Build Tools
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "platforms;android-37.1" "build-tools;37.0.0" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Run JVM unit tests
+        id: unit_tests
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee ci-logs/last-step.log
+
+      - name: Render Roborazzi UI screenshots (Phone, Tablet, Light, Dark, 200% font)
+        id: roborazzi
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          ./gradlew recordRoborazziDebug --stacktrace 2>&1 | tee ci-logs/last-step.log
+
+      - name: Run Android Lint
+        id: lint
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          ./gradlew lintDebug --stacktrace 2>&1 | tee ci-logs/last-step.log
+
+      - name: Assemble debug APKs (when app modules exist)
+        id: assemble_apks
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          if [ -d apps ] && find apps -maxdepth 2 -name 'build.gradle.kts' | grep -q .; then
+            ./gradlew assembleDebug --stacktrace 2>&1 | tee ci-logs/last-step.log
+          else
+            echo "No apps/* modules present yet; skipping assembleDebug."
+          fi
+
+      - name: Collect screenshots & APKs for mobile browser review
+        id: collect_artifacts
+        run: |
+          mkdir -p ci-artifacts/screenshots ci-artifacts/apks
+          find core apps -path '*/build/outputs/roborazzi/*.png' -type f -exec cp {} ci-artifacts/screenshots/ \; 2>/dev/null || true
+          find apps -path '*/build/outputs/apk/debug/*.apk' -type f -exec cp {} ci-artifacts/apks/ \; 2>/dev/null || true
+          echo "Collected screenshots:"
+          ls -la ci-artifacts/screenshots/
+          if [ -z "$(ls -A ci-artifacts/screenshots/)" ]; then
+            echo "::error::Expected at least one Roborazzi PNG screenshot to be generated."
+            exit 1
+          fi
+
+      - name: Upload Roborazzi UI screenshots
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: roborazzi-screenshots
+          path: ci-artifacts/screenshots/*.png
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload debug APKs (if any)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: debug-apks
+          path: ci-artifacts/apks/*.apk
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Post mobile-friendly verification summary on PR
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          JOB_STATUS: ${{ job.status }}
+          UNIT_OUTCOME: ${{ steps.unit_tests.outcome }}
+          ROBO_OUTCOME: ${{ steps.roborazzi.outcome }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const screenshots = fs.existsSync('ci-artifacts/screenshots')
+              ? fs.readdirSync('ci-artifacts/screenshots').sort()
+              : [];
+            const apks = fs.existsSync('ci-artifacts/apks')
+              ? fs.readdirSync('ci-artifacts/apks').sort()
+              : [];
+            const runUrl = `${context.payload.repository.html_url}/actions/runs/${context.runId}`;
+            const marker = '<!-- shkriuss-pr-verify -->';
+            const passed = process.env.JOB_STATUS === 'success';
+            const lines = [
+              marker,
+              passed ? '### PR Verify Passed' : '### PR Verify Failed',
+              '',
+              '- Guardrails & Gradle Wrapper validation: **PASS**',
+              `- JVM Unit Tests (\`testDebugUnitTest\`): **${process.env.UNIT_OUTCOME || 'skipped'}**`,
+              `- Roborazzi UI Screenshots (\`recordRoborazziDebug\`): **${process.env.ROBO_OUTCOME || 'skipped'}**`,
+              `- Android Lint (\`lintDebug\`): **${process.env.LINT_OUTCOME || 'skipped'}**`,
+              '',
+              `**Workflow Run & Artifacts (Vanadium):** [Open Run #${context.runId}](${runUrl}#artifacts)`,
+            ];
+            if (screenshots.length) {
+              lines.push('', '**Rendered Screenshots:**', ...screenshots.map(f => `- \`${f}\``));
+            }
+            if (apks.length) {
+              lines.push('', '**Debug APKs:**', ...apks.map(f => `- \`${f}\``));
+            }
+            if (!passed && fs.existsSync('ci-logs/last-step.log')) {
+              const raw = fs.readFileSync('ci-logs/last-step.log', 'utf8');
+              const allLines = raw.split('\n');
+              const highlights = allLines.filter(l =>
+                /^e: |FAILED|FAILURE:|What went wrong:|Caused by:|Exception|AssertionError|Error:/.test(l)
+              ).slice(-40);
+              const tail = allLines.slice(-60);
+              const excerpt = [...new Set([...highlights, '--- tail ---', ...tail])].join('\n').slice(-10000);
+              lines.push(
+                '',
+                '<details><summary>Failure log summary (mobile-friendly)</summary>',
+                '',
+                '```text',
+                excerpt,
+                '```',
+                '</details>',
+              );
+            }
+            const body = lines.join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

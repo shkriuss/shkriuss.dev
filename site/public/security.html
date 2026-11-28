@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Security &amp; Privacy — shkriuss.dev</title>
+  <meta name="description" content="GrapheneOS hardening, OWASP MASVS v2.1.0 security controls, cryptography, and trust boundaries.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <a class="site-brand" href="/">shkriuss.dev</a>
+      <p class="tagline">Security architecture, cryptography, and trust boundaries.</p>
+      <nav aria-label="Main navigation">
+        <a href="/">Apps</a>
+        <a href="/verify.html">Verify &amp; Install</a>
+        <a href="/security.html">Security &amp; Privacy</a>
+        <a href="https://github.com/shkriuss/shkriuss.dev">Source Code</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1>Security &amp; Privacy Architecture</h1>
+
+      <h2>GrapheneOS Hardening</h2>
+      <ul>
+        <li>Built to run with Exploit Protection Compatibility Mode <strong>OFF</strong> (<code>hardened_malloc</code>, ARM MTE, memory/storage DCL disabled, native debugging blocked).</li>
+        <li>Zero WebViews, zero hybrid JS engines, and zero Google Play services / Firebase / analytics.</li>
+        <li>Zero broad storage permissions: strictly Storage Access Framework (SAF) and the system Photo Picker.</li>
+        <li>Offline-first: works cleanly with <code>Network</code> and <code>Sensors</code> revoked, inside secondary profiles and Private Space.</li>
+      </ul>
+
+      <h2>Cryptography &amp; Local Storage</h2>
+      <ul>
+        <li><strong>Local Records:</strong> Room over GrapheneOS's hardened system SQLite with application-layer Google Tink <code>AES-256-GCM</code> AEAD and canonical per-record Associated Authenticated Data (AAD).</li>
+        <li><strong>Hardware Key Wrapping:</strong> Android Keystore Key Encryption Keys backed by StrongBox (Titan M2 / Secure Element) with hardware TEE fallback.</li>
+        <li><strong>Encrypted Preferences:</strong> Tink-encrypted Jetpack DataStore (zero use of deprecated <code>androidx.security:security-crypto</code>).</li>
+        <li><strong>E2EE Backups:</strong> Streaming <code>AES-256-GCM-HKDF</code> archives with pure-JVM Bouncy Castle <code>Argon2id</code> key derivation and authenticated headers, exported directly via SAF.</li>
+      </ul>
+
+      <h2>Trust Boundary</h2>
+      <p>
+        GitHub and Cloudflare are used solely as development, CI, and static hosting infrastructure.
+        Shipped Android apps have zero runtime dependency on Google, Apple, or any third-party cloud.
+        Optional self-hosted sync (planned in a later phase) is zero-knowledge ciphertext-only and
+        deployable to each user's own Cloudflare account from this repository.
+      </p>
+    </main>
+
+    <footer>
+      <p>
+        Full <a href="https://github.com/shkriuss/shkriuss.dev/blob/main/docs/security/threat-model.md">Threat Model</a>
+        and <a href="https://github.com/shkriuss/shkriuss.dev/blob/main/docs/security/masvs-v2.1-matrix.md">OWASP MASVS v2.1.0 Matrix</a>
+        are published in the repository.
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

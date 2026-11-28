@@ -1,0 +1,16 @@
+plugins {
+    alias(libs.plugins.shkriuss.android.library)
+    alias(libs.plugins.kotlin.serialization)
+}
+
+android {
+    namespace = "dev.shkriuss.core.backup"
+}
+
+dependencies {
+    api(projects.core.common)
+    api(projects.core.crypto)
+    api(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
+}

@@ -1,0 +1,133 @@
+name: Keygen Signing Key (Browser-Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: "Lowercase app slug (e.g. notes, budget, calendar)"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  keygen:
+    name: Generate Encrypted Per-App Signing Key
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Set up JDK 21 (for keytool)
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Generate PKCS#12 key in RAM and encrypt backup with GPG AES-256
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYGEN_KEYSTORE_PASSWORD }}
+          BACKUP_PASSPHRASE: ${{ secrets.KEYGEN_BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+
+          if ! printf '%s' "$APP_NAME" | grep -Eq '^[a-z][a-z0-9]{1,24}$'; then
+            echo "::error::Invalid app_name. Use 2-25 lowercase letters/digits starting with a letter."
+            exit 1
+          fi
+          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::Set KEYGEN_KEYSTORE_PASSWORD and KEYGEN_BACKUP_PASSPHRASE in the protected 'release' Environment before running keygen."
+            exit 1
+          fi
+          if [ "${#KEYSTORE_PASSWORD}" -lt 24 ] || [ "${#BACKUP_PASSPHRASE}" -lt 24 ]; then
+            echo "::error::Both KEYGEN_KEYSTORE_PASSWORD and KEYGEN_BACKUP_PASSPHRASE must be at least 24 characters long."
+            exit 1
+          fi
+          if [ "$KEYSTORE_PASSWORD" = "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::KEYGEN_KEYSTORE_PASSWORD and KEYGEN_BACKUP_PASSPHRASE must be distinct secrets."
+            exit 1
+          fi
+
+          WORK_DIR="/dev/shm/shkriuss-keygen-${GITHUB_RUN_ID}"
+          export GNUPGHOME="${WORK_DIR}/gnupg"
+          mkdir -p "$WORK_DIR" "$GNUPGHOME"
+          chmod 700 "$WORK_DIR" "$GNUPGHOME"
+
+          ALIAS="shkriuss-${APP_NAME}"
+          KEYSTORE="${WORK_DIR}/${APP_NAME}-release.p12"
+          ENC_OUT="encrypted-backup"
+          mkdir -p "$ENC_OUT"
+
+          # Generate RSA-4096 PKCS#12 signing key valid for ~27 years (10,000 days).
+          keytool -genkeypair \
+            -keystore "$KEYSTORE" \
+            -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD \
+            -keypass:env KEYSTORE_PASSWORD \
+            -alias "$ALIAS" \
+            -keyalg RSA \
+            -keysize 4096 \
+            -sigalg SHA384withRSA \
+            -validity 10000 \
+            -dname "CN=shkriuss ${APP_NAME}, OU=dev.shkriuss.${APP_NAME}, O=shkriuss.dev"
+
+          # Extract public SHA-256 certificate fingerprint only.
+          FINGERPRINT="$(keytool -list -v \
+            -keystore "$KEYSTORE" \
+            -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD \
+            -alias "$ALIAS" \
+            | awk '/SHA256:/ {print $2; exit}')"
+
+          # Encrypt keystore with authenticated OpenPGP SEIPD AES-256 + iterated salted SHA-512 S2K.
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 --s2k-mode 3 --s2k-digest-algo SHA512 --s2k-count 65011712 \
+            --output "${ENC_OUT}/${APP_NAME}-release.p12.gpg" \
+            "$KEYSTORE"
+
+          # Verify decryption roundtrip in RAM before uploading backup.
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --decrypt --output "${WORK_DIR}/verify.p12" \
+            "${ENC_OUT}/${APP_NAME}-release.p12.gpg"
+          cmp -s "$KEYSTORE" "${WORK_DIR}/verify.p12"
+
+          # Single-line base64 of the integrity-protected .gpg ciphertext for Vanadium secret pasting.
+          base64 -w 0 "${ENC_OUT}/${APP_NAME}-release.p12.gpg" > "${ENC_OUT}/${APP_NAME}-release.p12.gpg.b64"
+          printf '%s\n' "$FINGERPRINT" > "${ENC_OUT}/${APP_NAME}-sha256-fingerprint.txt"
+
+          APP_UPPER="$(printf '%s' "$APP_NAME" | tr '[:lower:]' '[:upper:]')"
+          {
+            echo "### Signing Key Generated for \`dev.shkriuss.${APP_NAME}\`"
+            echo ""
+            echo "- **Key Alias:** \`${ALIAS}\`"
+            echo "- **Public SHA-256 Certificate Fingerprint:**"
+            echo "  \`${FINGERPRINT}\`"
+            echo ""
+            echo "#### Next Steps (Mobile Browser)"
+            echo "1. Download the encrypted artifact below and save it into your offline password manager."
+            echo "2. Save per-app secrets in the \`release\` Environment:"
+            echo "   - \`SIGNING_${APP_UPPER}_GPG_B64\` (contents of \`${APP_NAME}-release.p12.gpg.b64\`)"
+            echo "   - \`SIGNING_${APP_UPPER}_GPG_PASSPHRASE\`"
+            echo "   - \`SIGNING_${APP_UPPER}_KEYSTORE_PASSWORD\`"
+            echo "3. Delete temporary \`KEYGEN_KEYSTORE_PASSWORD\` and \`KEYGEN_BACKUP_PASSPHRASE\` secrets."
+            echo "4. Publish the **public** SHA-256 fingerprint above to \`site/public/verify.html\` via PR."
+            echo "5. Delete this workflow run immediately after downloading the encrypted backup."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload encrypted backup artifact (1-day retention)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.app_name }}-signing-backup-encrypted
+          path: encrypted-backup/
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Shred RAM scratch directory
+        if: always()
+        run: |
+          WORK_DIR="/dev/shm/shkriuss-keygen-${GITHUB_RUN_ID}"
+          if [ -d "$WORK_DIR" ]; then
+            find "$WORK_DIR" -type f -exec shred -u {} \; || true
+            rm -rf "$WORK_DIR"
+          fi
