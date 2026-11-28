@@ -60,23 +60,39 @@ jobs:
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       - name: Run JVM unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        id: unit_tests
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee ci-logs/last-step.log
 
       - name: Render Roborazzi UI screenshots (Phone, Tablet, Light, Dark, 200% font)
-        run: ./gradlew recordRoborazziDebug --stacktrace
+        id: roborazzi
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          ./gradlew recordRoborazziDebug --stacktrace 2>&1 | tee ci-logs/last-step.log
 
       - name: Run Android Lint
-        run: ./gradlew lintDebug --stacktrace
+        id: lint
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          ./gradlew lintDebug --stacktrace 2>&1 | tee ci-logs/last-step.log
 
       - name: Assemble debug APKs (when app modules exist)
+        id: assemble_apks
         run: |
+          set -o pipefail
+          mkdir -p ci-logs
           if [ -d apps ] && find apps -maxdepth 2 -name 'build.gradle.kts' | grep -q .; then
-            ./gradlew assembleDebug --stacktrace
+            ./gradlew assembleDebug --stacktrace 2>&1 | tee ci-logs/last-step.log
           else
             echo "No apps/* modules present yet; skipping assembleDebug."
           fi
 
       - name: Collect screenshots & APKs for mobile browser review
+        id: collect_artifacts
         run: |
           mkdir -p ci-artifacts/screenshots ci-artifacts/apks
           find core apps -path '*/build/outputs/roborazzi/*.png' -type f -exec cp {} ci-artifacts/screenshots/ \; 2>/dev/null || true
@@ -105,7 +121,12 @@ jobs:
           if-no-files-found: ignore
 
       - name: Post mobile-friendly verification summary on PR
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          JOB_STATUS: ${{ job.status }}
+          UNIT_OUTCOME: ${{ steps.unit_tests.outcome }}
+          ROBO_OUTCOME: ${{ steps.roborazzi.outcome }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -118,21 +139,38 @@ jobs:
               : [];
             const runUrl = `${context.payload.repository.html_url}/actions/runs/${context.runId}`;
             const marker = '<!-- shkriuss-pr-verify -->';
-            const body = [
+            const passed = process.env.JOB_STATUS === 'success';
+            const lines = [
               marker,
-              '### PR Verify Passed',
+              passed ? '### PR Verify Passed' : '### PR Verify Failed',
               '',
               '- Guardrails & Gradle Wrapper validation: **PASS**',
-              '- JVM Unit Tests (`testDebugUnitTest`): **PASS**',
-              '- Roborazzi UI Screenshots (`recordRoborazziDebug`): **PASS**',
-              '- Android Lint (`lintDebug`): **PASS**',
+              `- JVM Unit Tests (\`testDebugUnitTest\`): **${process.env.UNIT_OUTCOME || 'skipped'}**`,
+              `- Roborazzi UI Screenshots (\`recordRoborazziDebug\`): **${process.env.ROBO_OUTCOME || 'skipped'}**`,
+              `- Android Lint (\`lintDebug\`): **${process.env.LINT_OUTCOME || 'skipped'}**`,
               '',
-              `**Artifacts (tap to inspect in Vanadium):** [Download from Workflow Run](${runUrl}#artifacts)`,
-              '',
-              '**Rendered Screenshots:**',
-              ...screenshots.map(f => `- \`${f}\``),
-              ...(apks.length ? ['', '**Debug APKs:**', ...apks.map(f => `- \`${f}\``)] : []),
-            ].join('\n');
+              `**Workflow Run & Artifacts (Vanadium):** [Open Run #${context.runId}](${runUrl}#artifacts)`,
+            ];
+            if (screenshots.length) {
+              lines.push('', '**Rendered Screenshots:**', ...screenshots.map(f => `- \`${f}\``));
+            }
+            if (apks.length) {
+              lines.push('', '**Debug APKs:**', ...apks.map(f => `- \`${f}\``));
+            }
+            if (!passed && fs.existsSync('ci-logs/last-step.log')) {
+              const raw = fs.readFileSync('ci-logs/last-step.log', 'utf8');
+              const tail = raw.split('\n').slice(-100).join('\n').slice(-10000);
+              lines.push(
+                '',
+                '<details><summary>Failure log tail (mobile-friendly)</summary>',
+                '',
+                '```text',
+                tail,
+                '```',
+                '</details>',
+              );
+            }
+            const body = lines.join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
